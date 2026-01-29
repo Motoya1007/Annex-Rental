@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import {
-  getAllTickets,
-  subscribeToTickets,
-  type Ticket,
-  type TicketStatus,
-} from "@/lib/ticketsService";
+
+type TicketStatus = "waiting" | "calling" | "serving";
+
+interface Ticket {
+  id: string;
+  number: string;
+  status: TicketStatus;
+  created_at: string;
+}
 
 const statusConfig = {
   waiting: {
@@ -29,18 +32,28 @@ const statusConfig = {
   },
 } as const;
 
+const POLLING_INTERVAL = 5000; // 5秒間隔
+
 export default function DisplayPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
 
-  const refreshTickets = useCallback(() => {
-    setTickets(getAllTickets());
+  const fetchTickets = useCallback(async () => {
+    try {
+      const res = await fetch("/api/tickets", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setTickets(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch tickets:", error);
+    }
   }, []);
 
   useEffect(() => {
-    refreshTickets();
-    const unsubscribe = subscribeToTickets(refreshTickets);
-    return unsubscribe;
-  }, [refreshTickets]);
+    fetchTickets();
+    const interval = setInterval(fetchTickets, POLLING_INTERVAL);
+    return () => clearInterval(interval);
+  }, [fetchTickets]);
 
   const ticketsByStatus = (status: TicketStatus) =>
     tickets.filter((t) => t.status === status);
