@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-type TicketStatus = "waiting" | "calling" | "serving";
-
-interface Ticket {
-  id: string;
-  number: string;
-  status: TicketStatus;
-  createdAt: number;
-}
+import { useEffect, useState, useCallback } from "react";
+import {
+  getAllTickets,
+  addTicket,
+  updateTicketStatus,
+  deleteTicket,
+  restoreTicket,
+  subscribeToTickets,
+  type Ticket,
+  type TicketStatus,
+} from "@/lib/ticketsService";
 
 const statusLabels: Record<TicketStatus, string> = {
   waiting: "貸出待ち",
@@ -17,76 +18,85 @@ const statusLabels: Record<TicketStatus, string> = {
   serving: "対応中",
 };
 
+interface Toast {
+  id: string;
+  message: string;
+  ticket: Ticket;
+}
+
 export default function AdminPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [newNumber, setNewNumber] = useState("");
   const [loading, setLoading] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const fetchTickets = async () => {
-    try {
-      const res = await fetch("/api/tickets", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setTickets(data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch tickets:", error);
-    }
-  };
-
-  useEffect(() => {
-    fetchTickets();
+  const refreshTickets = useCallback(() => {
+    setTickets(getAllTickets());
   }, []);
 
-  const handleAdd = async (e: React.FormEvent) => {
+  useEffect(() => {
+    refreshTickets();
+    const unsubscribe = subscribeToTickets(refreshTickets);
+    return unsubscribe;
+  }, [refreshTickets]);
+
+  const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNumber.trim()) return;
 
     setLoading(true);
-    try {
-      const res = await fetch("/api/tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number: newNumber }),
-      });
-      if (res.ok) {
-        setNewNumber("");
-        await fetchTickets();
-      }
-    } catch (error) {
-      console.error("Failed to add ticket:", error);
-    } finally {
-      setLoading(false);
+    const { ticket, isExisting } = addTicket(newNumber);
+    setNewNumber("");
+    refreshTickets();
+    setLoading(false);
+
+    if (isExisting) {
+      showToastMessage(`番号「${ticket.number}」を貸出待ちに戻しました`);
     }
   };
 
-  const handleStatusChange = async (id: string, status: TicketStatus) => {
-    try {
-      const res = await fetch(`/api/tickets/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        await fetchTickets();
-      }
-    } catch (error) {
-      console.error("Failed to update ticket:", error);
+  const handleStatusChange = (id: string, status: TicketStatus) => {
+    updateTicketStatus(id, status);
+    refreshTickets();
+  };
+
+  const handleDelete = (id: string) => {
+    const deleted = deleteTicket(id);
+    if (deleted) {
+      refreshTickets();
+      showUndoToast(deleted);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("削除しますか？")) return;
-    try {
-      const res = await fetch(`/api/tickets/${id}`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        await fetchTickets();
-      }
-    } catch (error) {
-      console.error("Failed to delete ticket:", error);
+  const showToastMessage = (message: string) => {
+    const id = crypto.randomUUID();
+    const dummyTicket: Ticket = { id: "", number: "", status: "waiting", createdAt: 0 };
+    setToasts((prev) => [...prev, { id, message, ticket: dummyTicket }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  };
+
+  const showUndoToast = (ticket: Ticket) => {
+    const id = crypto.randomUUID();
+    setToasts((prev) => [...prev, { id, message: `「${ticket.number}」を削除しました`, ticket }]);
+
+    // 5秒後に自動で消える
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  };
+
+  const handleUndo = (toast: Toast) => {
+    if (toast.ticket.id) {
+      restoreTicket(toast.ticket);
+      refreshTickets();
     }
+    setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
   return (
@@ -219,6 +229,37 @@ export default function AdminPage() {
             </ul>
           )}
         </div>
+      </div>
+
+      {/* Toast notifications */}
+      <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className="flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg"
+            style={{ backgroundColor: "#1f2937", color: "#fff", minWidth: "280px" }}
+          >
+            <span className="flex-1">{toast.message}</span>
+            {toast.ticket.id && (
+              <button
+                type="button"
+                onClick={() => handleUndo(toast)}
+                className="px-2 py-1 text-sm rounded font-medium"
+                style={{ backgroundColor: "#3b82f6", color: "#fff" }}
+              >
+                元に戻す
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => dismissToast(toast.id)}
+              className="text-gray-400 hover:text-white"
+              style={{ fontSize: "18px", lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );

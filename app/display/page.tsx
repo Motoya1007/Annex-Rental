@@ -1,15 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-type TicketStatus = "waiting" | "calling" | "serving";
-
-interface Ticket {
-  id: string;
-  number: string;
-  status: TicketStatus;
-  createdAt: number;
-}
+import { useEffect, useState, useCallback } from "react";
+import {
+  getAllTickets,
+  subscribeToTickets,
+  type Ticket,
+  type TicketStatus,
+} from "@/lib/ticketsService";
 
 const statusConfig = {
   waiting: {
@@ -35,23 +32,15 @@ const statusConfig = {
 export default function DisplayPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
 
-  useEffect(() => {
-    const fetchTickets = async () => {
-      try {
-        const res = await fetch("/api/tickets", { cache: "no-store" });
-        if (res.ok) {
-          const data = await res.json();
-          setTickets(data);
-        }
-      } catch (error) {
-        console.error("Failed to fetch tickets:", error);
-      }
-    };
-
-    fetchTickets();
-    const interval = setInterval(fetchTickets, 1500);
-    return () => clearInterval(interval);
+  const refreshTickets = useCallback(() => {
+    setTickets(getAllTickets());
   }, []);
+
+  useEffect(() => {
+    refreshTickets();
+    const unsubscribe = subscribeToTickets(refreshTickets);
+    return unsubscribe;
+  }, [refreshTickets]);
 
   const ticketsByStatus = (status: TicketStatus) =>
     tickets.filter((t) => t.status === status);
