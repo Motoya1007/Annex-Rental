@@ -11,22 +11,23 @@ interface TicketStore {
   tickets: Ticket[];
 }
 
-// globalThisを使ってホットリロードでもデータを維持
 const globalForStore = globalThis as unknown as {
   ticketStore: TicketStore | undefined;
 };
 
-const store: TicketStore = globalForStore.ticketStore ?? { tickets: [] };
-
-if (!globalForStore.ticketStore) {
-  globalForStore.ticketStore = store;
+function getStore(): TicketStore {
+  if (!globalForStore.ticketStore) {
+    globalForStore.ticketStore = { tickets: [] };
+  }
+  return globalForStore.ticketStore;
 }
 
 export function getAllTickets(): Ticket[] {
-  return [...store.tickets].sort((a, b) => b.createdAt - a.createdAt);
+  return [...getStore().tickets].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export function addTicket(number: string): Ticket {
+  const store = getStore();
   const ticket: Ticket = {
     id: crypto.randomUUID(),
     number,
@@ -37,10 +38,8 @@ export function addTicket(number: string): Ticket {
   return ticket;
 }
 
-export function updateTicketStatus(
-  id: string,
-  status: TicketStatus
-): Ticket | null {
+export function updateTicketStatus(id: string, status: TicketStatus): Ticket | null {
+  const store = getStore();
   const ticket = store.tickets.find((t) => t.id === id);
   if (!ticket) return null;
   ticket.status = status;
@@ -48,6 +47,7 @@ export function updateTicketStatus(
 }
 
 export function deleteTicket(id: string): boolean {
+  const store = getStore();
   const index = store.tickets.findIndex((t) => t.id === id);
   if (index === -1) return false;
   store.tickets.splice(index, 1);

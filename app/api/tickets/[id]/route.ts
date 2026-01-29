@@ -20,10 +20,7 @@ export async function PATCH(
 
   const ticket = updateTicketStatus(id, status);
   if (!ticket) {
-    return NextResponse.json(
-      { error: "Ticket not found" },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
   }
 
   return NextResponse.json(ticket);
@@ -37,10 +34,7 @@ export async function DELETE(
   const deleted = deleteTicket(id);
 
   if (!deleted) {
-    return NextResponse.json(
-      { error: "Ticket not found" },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
   }
 
   return NextResponse.json({ success: true });
