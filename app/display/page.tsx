@@ -14,21 +14,21 @@ interface Ticket {
 const statusConfig = {
   waiting: {
     label: "貸出待ち",
-    borderColor: "border-blue-500",
-    bgColor: "bg-blue-50",
-    cardBg: "bg-blue-100",
+    borderColor: "#3b82f6",
+    bgColor: "#eff6ff",
+    cardBg: "#dbeafe",
   },
   calling: {
     label: "呼び出し中",
-    borderColor: "border-yellow-500",
-    bgColor: "bg-yellow-50",
-    cardBg: "bg-yellow-100",
+    borderColor: "#eab308",
+    bgColor: "#fefce8",
+    cardBg: "#fef3c7",
   },
   serving: {
     label: "対応中",
-    borderColor: "border-green-500",
-    bgColor: "bg-green-50",
-    cardBg: "bg-green-100",
+    borderColor: "#22c55e",
+    bgColor: "#f0fdf4",
+    cardBg: "#d1fae5",
   },
 } as const;
 
@@ -57,26 +57,44 @@ export default function DisplayPage() {
     tickets.filter((t) => t.status === status);
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <h1 className="text-3xl font-bold text-center mb-8">番号案内</h1>
+    <div className="min-h-screen p-6" style={{ backgroundColor: "#f3f4f6" }}>
+      <h1
+        className="text-3xl font-bold text-center mb-8"
+        style={{ color: "#111" }}
+      >
+        番号案内
+      </h1>
       <div className="grid grid-cols-3 gap-6 max-w-6xl mx-auto">
         {(["waiting", "calling", "serving"] as const).map((status) => {
           const config = statusConfig[status];
           return (
             <div
               key={status}
-              className={`${config.bgColor} ${config.borderColor} border-4 rounded-lg p-4 min-h-[400px]`}
+              className="rounded-lg p-4 min-h-[400px]"
+              style={{
+                backgroundColor: config.bgColor,
+                border: `4px solid ${config.borderColor}`,
+              }}
             >
-              <h2 className="text-xl font-bold text-center mb-4">
+              <h2
+                className="text-xl font-bold text-center mb-4"
+                style={{ color: "#111" }}
+              >
                 {config.label}
               </h2>
               <div className="space-y-3">
                 {ticketsByStatus(status).map((ticket) => (
                   <div
                     key={ticket.id}
-                    className={`${config.cardBg} rounded-lg p-4 text-center shadow`}
+                    className="rounded-lg p-4 text-center shadow"
+                    style={{ backgroundColor: config.cardBg }}
                   >
-                    <span className="text-2xl font-bold">{ticket.number}</span>
+                    <span
+                      className="text-2xl font-bold"
+                      style={{ color: "#111" }}
+                    >
+                      {ticket.number}
+                    </span>
                   </div>
                 ))}
               </div>
