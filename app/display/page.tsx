@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-type TicketStatus = "waiting" | "calling" | "serving";
+type TicketStatus = "waiting" | "called";
 
 interface Ticket {
   id: string;
@@ -14,24 +14,12 @@ interface Ticket {
 const statusConfig = {
   waiting: {
     label: "貸出待ち",
-    nextStatus: "calling" as TicketStatus,
-    nextLabel: "呼び出す",
     borderColor: "#3b82f6",
     bgColor: "#eff6ff",
     cardBg: "#dbeafe",
   },
-  calling: {
-    label: "呼び出し中",
-    nextStatus: "serving" as TicketStatus,
-    nextLabel: "対応開始",
-    borderColor: "#eab308",
-    bgColor: "#fefce8",
-    cardBg: "#fef3c7",
-  },
-  serving: {
-    label: "対応中",
-    nextStatus: null, // serving は削除なので遷移なし
-    nextLabel: null,
+  called: {
+    label: "呼び出し済み",
     borderColor: "#22c55e",
     bgColor: "#f0fdf4",
     cardBg: "#d1fae5",
@@ -71,37 +59,28 @@ export default function DisplayPage() {
     return () => clearInterval(interval);
   }, [fetchTickets]);
 
-  const handleStatusChange = async (ticket: Ticket) => {
-    const config = statusConfig[ticket.status];
-    const nextStatus = config.nextStatus;
-
-    // serving は削除なのでここでは処理しない
-    if (!nextStatus) return;
-
-    // ローディング開始
+  // waiting → called に変更
+  const handleCall = async (ticket: Ticket) => {
     setLoadingIds((prev) => new Set(prev).add(ticket.id));
 
     // 楽観更新
     setTickets((prev) =>
-      prev.map((t) => (t.id === ticket.id ? { ...t, status: nextStatus } : t))
+      prev.map((t) => (t.id === ticket.id ? { ...t, status: "called" as TicketStatus } : t))
     );
 
     try {
       const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({ status: "called" }),
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to update");
-      }
-
+      if (!res.ok) throw new Error("Failed to update");
       await fetchTickets();
     } catch (error) {
       // 失敗時は元に戻す
       setTickets((prev) =>
-        prev.map((t) => (t.id === ticket.id ? { ...t, status: ticket.status } : t))
+        prev.map((t) => (t.id === ticket.id ? { ...t, status: "waiting" as TicketStatus } : t))
       );
       alert("更新に失敗しました。再試行してください。");
     } finally {
@@ -113,8 +92,8 @@ export default function DisplayPage() {
     }
   };
 
+  // called → 削除（完了）
   const handleComplete = async (ticket: Ticket) => {
-    // ローディング開始
     setLoadingIds((prev) => new Set(prev).add(ticket.id));
 
     // 楽観更新（削除）
@@ -125,10 +104,7 @@ export default function DisplayPage() {
         method: "DELETE",
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to delete");
-      }
-
+      if (!res.ok) throw new Error("Failed to delete");
       showUndoToast(ticket);
     } catch (error) {
       // 失敗時は元に戻す
@@ -194,7 +170,7 @@ export default function DisplayPage() {
   return (
     <div className="min-h-screen p-4 md:p-6" style={{ backgroundColor: "#f3f4f6" }}>
       {/* ヘッダー */}
-      <div className="max-w-6xl mx-auto mb-6">
+      <div className="max-w-4xl mx-auto mb-6">
         <h1
           className="text-2xl md:text-3xl font-bold text-center mb-4"
           style={{ color: "#111" }}
@@ -233,15 +209,16 @@ export default function DisplayPage() {
 
         {/* 操作説明 */}
         <div className="mt-3 text-center text-sm" style={{ color: "#6b7280" }}>
-          待ち・呼出カードをタップでステータス変更 / 対応中は「完了」で削除
+          貸出待ちをタップ → 呼び出し済みへ / 呼び出し済みは「完了」で削除
         </div>
       </div>
 
-      {/* 3カラムレイアウト */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 max-w-6xl mx-auto">
-        {(["waiting", "calling", "serving"] as const).map((status) => {
+      {/* 2カラムレイアウト */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 max-w-4xl mx-auto">
+        {(["waiting", "called"] as const).map((status) => {
           const config = statusConfig[status];
           const statusTickets = ticketsByStatus(status);
+          const isWaiting = status === "waiting";
 
           return (
             <div
@@ -267,14 +244,13 @@ export default function DisplayPage() {
               <div className="space-y-3">
                 {statusTickets.map((ticket) => {
                   const isLoading = loadingIds.has(ticket.id);
-                  const isServing = status === "serving";
 
                   return (
                     <div
                       key={ticket.id}
-                      onClick={() => !isLoading && !isServing && handleStatusChange(ticket)}
+                      onClick={() => !isLoading && isWaiting && handleCall(ticket)}
                       className={`relative rounded-lg p-4 shadow transition-all duration-150 ${
-                        isServing ? "" : "cursor-pointer active:scale-95"
+                        isWaiting && !isLoading ? "cursor-pointer active:scale-95" : ""
                       }`}
                       style={{
                         backgroundColor: isLoading ? "#e5e7eb" : config.cardBg,
@@ -315,8 +291,12 @@ export default function DisplayPage() {
                             </svg>
                             処理中...
                           </span>
-                        ) : isServing ? (
-                          // serving は「完了」ボタンで削除
+                        ) : isWaiting ? (
+                          <span className="text-xs md:text-sm" style={{ color: "#6b7280" }}>
+                            タップ → 呼び出し
+                          </span>
+                        ) : (
+                          // called は「完了」ボタンで削除
                           <button
                             type="button"
                             onClick={() => handleComplete(ticket)}
@@ -328,10 +308,6 @@ export default function DisplayPage() {
                           >
                             完了（削除）
                           </button>
-                        ) : (
-                          <span className="text-xs md:text-sm" style={{ color: "#6b7280" }}>
-                            タップ → {config.nextLabel}
-                          </span>
                         )}
                       </div>
                     </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 
-type TicketStatus = "waiting" | "calling" | "serving";
+type TicketStatus = "waiting" | "called";
 
 interface Ticket {
   id: string;
@@ -11,11 +11,20 @@ interface Ticket {
   created_at: string;
 }
 
-const statusLabels: Record<TicketStatus, string> = {
-  waiting: "貸出待ち",
-  calling: "呼び出し中",
-  serving: "対応中",
-};
+const statusConfig = {
+  waiting: {
+    label: "貸出待ち",
+    borderColor: "#3b82f6",
+    bgColor: "#eff6ff",
+    cardBg: "#dbeafe",
+  },
+  called: {
+    label: "呼び出し済み",
+    borderColor: "#22c55e",
+    bgColor: "#f0fdf4",
+    cardBg: "#d1fae5",
+  },
+} as const;
 
 interface Toast {
   id: string;
@@ -67,7 +76,7 @@ export default function AdminPage() {
       if (res.ok) {
         const { isExisting, ticket } = await res.json();
         setNewNumber("");
-        await fetchTickets(); // 即時再fetch
+        await fetchTickets();
 
         if (isExisting) {
           showToast(`番号「${ticket.number}」を貸出待ちに戻しました`);
@@ -80,30 +89,31 @@ export default function AdminPage() {
     }
   };
 
-  const handleStatusChange = async (id: string, status: TicketStatus) => {
+  // waiting → called
+  const handleCall = async (ticket: Ticket) => {
     try {
-      const res = await fetch(`/api/tickets/${id}`, {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status: "called" }),
       });
       if (res.ok) {
-        await fetchTickets(); // 即時再fetch
+        await fetchTickets();
       }
     } catch (error) {
       console.error("Failed to update ticket:", error);
     }
   };
 
-  const handleDelete = async (id: string) => {
+  // called → 削除
+  const handleComplete = async (ticket: Ticket) => {
     try {
-      const res = await fetch(`/api/tickets/${id}`, {
+      const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: "DELETE",
       });
       if (res.ok) {
-        const { deleted } = await res.json();
-        await fetchTickets(); // 即時再fetch
-        showUndoToast(deleted);
+        await fetchTickets();
+        showUndoToast(ticket);
       }
     } catch (error) {
       console.error("Failed to delete ticket:", error);
@@ -137,7 +147,7 @@ export default function AdminPage() {
     const id = crypto.randomUUID();
     setToasts((prev) => [
       ...prev,
-      { id, message: `「${ticket.number}」を削除しました`, deletedTicket: ticket },
+      { id, message: `「${ticket.number}」を完了しました`, deletedTicket: ticket },
     ]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -163,10 +173,13 @@ export default function AdminPage() {
     });
   };
 
+  const ticketsByStatus = (status: TicketStatus) =>
+    tickets.filter((t) => t.status === status);
+
   return (
-    <div className="min-h-screen p-6" style={{ backgroundColor: "#f3f4f6" }}>
+    <div className="min-h-screen p-4 md:p-6" style={{ backgroundColor: "#f3f4f6" }}>
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold text-center mb-8" style={{ color: "#111" }}>
+        <h1 className="text-2xl md:text-3xl font-bold text-center mb-6" style={{ color: "#111" }}>
           管理画面
         </h1>
 
@@ -205,120 +218,114 @@ export default function AdminPage() {
           </div>
         </form>
 
-        {/* チケット一覧 */}
-        <div className="rounded-lg shadow" style={{ backgroundColor: "#fff" }}>
-          {/* ヘッダー（更新情報バー） */}
-          <div
-            className="flex items-center justify-between p-4"
-            style={{ borderBottom: "1px solid #e5e7eb" }}
-          >
-            <div>
-              <h2 className="text-xl font-bold" style={{ color: "#111" }}>
-                チケット一覧
-              </h2>
-              <div className="text-xs mt-1" style={{ color: "#6b7280" }}>
-                最終更新: {lastUpdated ? formatTime(lastUpdated) : "---"}
-                <span className="ml-2">(10秒ごと自動更新)</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => fetchTickets()}
-              className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
-              style={{ backgroundColor: "#e5e7eb", color: "#374151" }}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              更新
-            </button>
+        {/* 更新情報バー */}
+        <div
+          className="flex items-center justify-between rounded-lg px-4 py-2 mb-4 shadow"
+          style={{ backgroundColor: "#fff" }}
+        >
+          <div className="text-sm" style={{ color: "#6b7280" }}>
+            最終更新:{" "}
+            <span style={{ color: "#111", fontWeight: 500 }}>
+              {lastUpdated ? formatTime(lastUpdated) : "---"}
+            </span>
+            <span className="ml-2">(10秒ごと自動更新)</span>
           </div>
+          <button
+            type="button"
+            onClick={() => fetchTickets()}
+            className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
+            style={{ backgroundColor: "#e5e7eb", color: "#374151" }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            更新
+          </button>
+        </div>
 
-          {tickets.length === 0 ? (
-            <div className="p-8 text-center" style={{ color: "#6b7280" }}>
-              チケットがありません
-            </div>
-          ) : (
-            <ul>
-              {tickets.map((ticket) => (
-                <li
-                  key={ticket.id}
-                  className="flex items-center justify-between p-4"
-                  style={{ borderBottom: "1px solid #e5e7eb" }}
-                >
-                  <div className="flex items-center gap-4">
-                    <span
-                      className="text-xl font-bold min-w-[60px]"
-                      style={{ color: "#111" }}
+        {/* 2セクション表示 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          {(["waiting", "called"] as const).map((status) => {
+            const config = statusConfig[status];
+            const statusTickets = ticketsByStatus(status);
+            const isWaiting = status === "waiting";
+
+            return (
+              <div
+                key={status}
+                className="rounded-lg p-4 min-h-[250px]"
+                style={{
+                  backgroundColor: config.bgColor,
+                  border: `4px solid ${config.borderColor}`,
+                }}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg md:text-xl font-bold" style={{ color: "#111" }}>
+                    {config.label}
+                  </h2>
+                  <span
+                    className="text-sm font-medium px-2 py-0.5 rounded-full"
+                    style={{ backgroundColor: config.borderColor, color: "#fff" }}
+                  >
+                    {statusTickets.length}
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {statusTickets.map((ticket) => (
+                    <div
+                      key={ticket.id}
+                      className="flex items-center justify-between rounded-lg p-3 shadow"
+                      style={{ backgroundColor: config.cardBg }}
                     >
-                      {ticket.number}
-                    </span>
-                    <span className="text-sm" style={{ color: "#6b7280" }}>
-                      ({statusLabels[ticket.status]})
-                    </span>
-                  </div>
-                  <div className="flex gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange(ticket.id, "waiting")}
-                      disabled={ticket.status === "waiting"}
-                      className="px-3 py-1 text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: "#dbeafe",
-                        color: "#1d4ed8",
-                        cursor: ticket.status === "waiting" ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      貸出待ちへ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange(ticket.id, "calling")}
-                      disabled={ticket.status === "calling"}
-                      className="px-3 py-1 text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: "#fef3c7",
-                        color: "#a16207",
-                        cursor: ticket.status === "calling" ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      呼び出し中へ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStatusChange(ticket.id, "serving")}
-                      disabled={ticket.status === "serving"}
-                      className="px-3 py-1 text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: "#d1fae5",
-                        color: "#047857",
-                        cursor: ticket.status === "serving" ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      対応中へ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(ticket.id)}
-                      className="px-3 py-1 text-sm rounded"
-                      style={{
-                        backgroundColor: "#fee2e2",
-                        color: "#b91c1c",
-                        cursor: "pointer",
-                      }}
-                    >
-                      削除
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+                      <span
+                        className="text-xl font-bold min-w-[60px]"
+                        style={{ color: "#111" }}
+                      >
+                        {ticket.number}
+                      </span>
+                      {isWaiting ? (
+                        <button
+                          type="button"
+                          onClick={() => handleCall(ticket)}
+                          className="px-3 py-1 text-sm rounded font-medium"
+                          style={{
+                            backgroundColor: "#22c55e",
+                            color: "#fff",
+                          }}
+                        >
+                          呼び出す
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleComplete(ticket)}
+                          className="px-3 py-1 text-sm rounded font-medium"
+                          style={{
+                            backgroundColor: "#dc2626",
+                            color: "#fff",
+                          }}
+                        >
+                          完了
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {statusTickets.length === 0 && (
+                    <div className="text-center py-6 text-sm" style={{ color: "#9ca3af" }}>
+                      なし
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

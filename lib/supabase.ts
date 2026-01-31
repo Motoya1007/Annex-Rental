@@ -20,8 +20,8 @@ export const supabaseAdmin = supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey)
   : null;
 
-// 型定義
-export type TicketStatus = "waiting" | "calling" | "serving";
+// 型定義（新仕様: waiting / called の2ステータス）
+export type TicketStatus = "waiting" | "called";
 
 export interface Ticket {
   id: string;

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin, TicketStatus } from "@/lib/supabase";
 
-const validStatuses: TicketStatus[] = ["waiting", "calling", "serving"];
+const validStatuses: TicketStatus[] = ["waiting", "called"];
 
 /**
  * PATCH /api/tickets/[id]
- * チケットのステータスを更新
+ * チケットのステータスを更新（waiting / called のみ）
  */
 export async function PATCH(
   request: Request,
@@ -24,7 +24,7 @@ export async function PATCH(
 
   if (!status || !validStatuses.includes(status)) {
     return NextResponse.json(
-      { error: "Invalid status. Must be: waiting, calling, or serving" },
+      { error: "Invalid status. Must be: waiting or called" },
       { status: 400 }
     );
   }
