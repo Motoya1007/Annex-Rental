@@ -23,11 +23,14 @@ interface Toast {
   deletedTicket?: Ticket;
 }
 
+const POLLING_INTERVAL = 10000; // 10秒
+
 export default function AdminPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [newNumber, setNewNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const fetchTickets = useCallback(async () => {
     try {
@@ -35,14 +38,18 @@ export default function AdminPage() {
       if (res.ok) {
         const data = await res.json();
         setTickets(data);
+        setLastUpdated(new Date());
       }
     } catch (error) {
       console.error("Failed to fetch tickets:", error);
     }
   }, []);
 
+  // 初回fetch + 10秒おき自動更新
   useEffect(() => {
     fetchTickets();
+    const interval = setInterval(fetchTickets, POLLING_INTERVAL);
+    return () => clearInterval(interval);
   }, [fetchTickets]);
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -60,7 +67,7 @@ export default function AdminPage() {
       if (res.ok) {
         const { isExisting, ticket } = await res.json();
         setNewNumber("");
-        await fetchTickets();
+        await fetchTickets(); // 即時再fetch
 
         if (isExisting) {
           showToast(`番号「${ticket.number}」を貸出待ちに戻しました`);
@@ -81,7 +88,7 @@ export default function AdminPage() {
         body: JSON.stringify({ status }),
       });
       if (res.ok) {
-        await fetchTickets();
+        await fetchTickets(); // 即時再fetch
       }
     } catch (error) {
       console.error("Failed to update ticket:", error);
@@ -95,7 +102,7 @@ export default function AdminPage() {
       });
       if (res.ok) {
         const { deleted } = await res.json();
-        await fetchTickets();
+        await fetchTickets(); // 即時再fetch
         showUndoToast(deleted);
       }
     } catch (error) {
@@ -148,6 +155,14 @@ export default function AdminPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString("ja-JP", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  };
+
   return (
     <div className="min-h-screen p-6" style={{ backgroundColor: "#f3f4f6" }}>
       <div className="max-w-4xl mx-auto">
@@ -192,11 +207,38 @@ export default function AdminPage() {
 
         {/* チケット一覧 */}
         <div className="rounded-lg shadow" style={{ backgroundColor: "#fff" }}>
-          <div className="p-4" style={{ borderBottom: "1px solid #e5e7eb" }}>
-            <h2 className="text-xl font-bold" style={{ color: "#111" }}>
-              チケット一覧
-            </h2>
+          {/* ヘッダー（更新情報バー） */}
+          <div
+            className="flex items-center justify-between p-4"
+            style={{ borderBottom: "1px solid #e5e7eb" }}
+          >
+            <div>
+              <h2 className="text-xl font-bold" style={{ color: "#111" }}>
+                チケット一覧
+              </h2>
+              <div className="text-xs mt-1" style={{ color: "#6b7280" }}>
+                最終更新: {lastUpdated ? formatTime(lastUpdated) : "---"}
+                <span className="ml-2">(10秒ごと自動更新)</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchTickets()}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
+              style={{ backgroundColor: "#e5e7eb", color: "#374151" }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              更新
+            </button>
           </div>
+
           {tickets.length === 0 ? (
             <div className="p-8 text-center" style={{ color: "#6b7280" }}>
               チケットがありません

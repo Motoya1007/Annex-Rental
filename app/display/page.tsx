@@ -19,7 +19,6 @@ const statusConfig = {
     borderColor: "#3b82f6",
     bgColor: "#eff6ff",
     cardBg: "#dbeafe",
-    cardHover: "#bfdbfe",
   },
   calling: {
     label: "呼び出し中",
@@ -28,16 +27,14 @@ const statusConfig = {
     borderColor: "#eab308",
     bgColor: "#fefce8",
     cardBg: "#fef3c7",
-    cardHover: "#fde68a",
   },
   serving: {
     label: "対応中",
-    nextStatus: "waiting" as TicketStatus,
-    nextLabel: "完了→待ちへ",
+    nextStatus: null, // serving は削除なので遷移なし
+    nextLabel: null,
     borderColor: "#22c55e",
     bgColor: "#f0fdf4",
     cardBg: "#d1fae5",
-    cardHover: "#a7f3d0",
   },
 } as const;
 
@@ -78,6 +75,9 @@ export default function DisplayPage() {
     const config = statusConfig[ticket.status];
     const nextStatus = config.nextStatus;
 
+    // serving は削除なのでここでは処理しない
+    if (!nextStatus) return;
+
     // ローディング開始
     setLoadingIds((prev) => new Set(prev).add(ticket.id));
 
@@ -97,7 +97,6 @@ export default function DisplayPage() {
         throw new Error("Failed to update");
       }
 
-      // 成功時は再fetchして最新状態を取得
       await fetchTickets();
     } catch (error) {
       // 失敗時は元に戻す
@@ -114,9 +113,7 @@ export default function DisplayPage() {
     }
   };
 
-  const handleDelete = async (ticket: Ticket, e: React.MouseEvent) => {
-    e.stopPropagation(); // カードのクリックイベントを止める
-
+  const handleComplete = async (ticket: Ticket) => {
     // ローディング開始
     setLoadingIds((prev) => new Set(prev).add(ticket.id));
 
@@ -132,13 +129,14 @@ export default function DisplayPage() {
         throw new Error("Failed to delete");
       }
 
-      // 成功時はUndoトーストを表示
       showUndoToast(ticket);
     } catch (error) {
       // 失敗時は元に戻す
-      setTickets((prev) => [...prev, ticket].sort((a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      ));
+      setTickets((prev) =>
+        [...prev, ticket].sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+      );
       alert("削除に失敗しました。");
     } finally {
       setLoadingIds((prev) => {
@@ -153,7 +151,7 @@ export default function DisplayPage() {
     const id = crypto.randomUUID();
     setToasts((prev) => [
       ...prev,
-      { id, message: `「${ticket.number}」を削除しました`, deletedTicket: ticket },
+      { id, message: `「${ticket.number}」を完了しました`, deletedTicket: ticket },
     ]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -221,12 +219,7 @@ export default function DisplayPage() {
             className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium"
             style={{ backgroundColor: "#e5e7eb", color: "#374151" }}
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -239,11 +232,8 @@ export default function DisplayPage() {
         </div>
 
         {/* 操作説明 */}
-        <div
-          className="mt-3 text-center text-sm"
-          style={{ color: "#6b7280" }}
-        >
-          カードをタップでステータス変更 / 右上×で削除
+        <div className="mt-3 text-center text-sm" style={{ color: "#6b7280" }}>
+          待ち・呼出カードをタップでステータス変更 / 対応中は「完了」で削除
         </div>
       </div>
 
@@ -263,18 +253,12 @@ export default function DisplayPage() {
               }}
             >
               <div className="flex items-center justify-between mb-4">
-                <h2
-                  className="text-lg md:text-xl font-bold"
-                  style={{ color: "#111" }}
-                >
+                <h2 className="text-lg md:text-xl font-bold" style={{ color: "#111" }}>
                   {config.label}
                 </h2>
                 <span
                   className="text-sm font-medium px-2 py-0.5 rounded-full"
-                  style={{
-                    backgroundColor: config.borderColor,
-                    color: "#fff",
-                  }}
+                  style={{ backgroundColor: config.borderColor, color: "#fff" }}
                 >
                   {statusTickets.length}
                 </span>
@@ -283,28 +267,20 @@ export default function DisplayPage() {
               <div className="space-y-3">
                 {statusTickets.map((ticket) => {
                   const isLoading = loadingIds.has(ticket.id);
+                  const isServing = status === "serving";
 
                   return (
                     <div
                       key={ticket.id}
-                      onClick={() => !isLoading && handleStatusChange(ticket)}
-                      className="relative rounded-lg p-4 shadow cursor-pointer transition-all duration-150 active:scale-95"
+                      onClick={() => !isLoading && !isServing && handleStatusChange(ticket)}
+                      className={`relative rounded-lg p-4 shadow transition-all duration-150 ${
+                        isServing ? "" : "cursor-pointer active:scale-95"
+                      }`}
                       style={{
                         backgroundColor: isLoading ? "#e5e7eb" : config.cardBg,
                         opacity: isLoading ? 0.7 : 1,
                       }}
                     >
-                      {/* 削除ボタン */}
-                      <button
-                        type="button"
-                        onClick={(e) => handleDelete(ticket, e)}
-                        disabled={isLoading}
-                        className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-red-500 hover:bg-red-100 transition-colors"
-                        style={{ fontSize: "16px" }}
-                      >
-                        ×
-                      </button>
-
                       {/* 番号 */}
                       <div className="text-center">
                         <span
@@ -315,18 +291,14 @@ export default function DisplayPage() {
                         </span>
                       </div>
 
-                      {/* 次のアクション表示 */}
-                      <div
-                        className="text-center mt-2 text-xs md:text-sm"
-                        style={{ color: "#6b7280" }}
-                      >
+                      {/* アクション表示 */}
+                      <div className="text-center mt-3">
                         {isLoading ? (
-                          <span className="flex items-center justify-center gap-1">
-                            <svg
-                              className="animate-spin h-4 w-4"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                            >
+                          <span
+                            className="flex items-center justify-center gap-1 text-xs md:text-sm"
+                            style={{ color: "#6b7280" }}
+                          >
+                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                               <circle
                                 className="opacity-25"
                                 cx="12"
@@ -341,10 +313,25 @@ export default function DisplayPage() {
                                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                               />
                             </svg>
-                            更新中...
+                            処理中...
                           </span>
+                        ) : isServing ? (
+                          // serving は「完了」ボタンで削除
+                          <button
+                            type="button"
+                            onClick={() => handleComplete(ticket)}
+                            className="px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition-all active:scale-95"
+                            style={{
+                              backgroundColor: "#dc2626",
+                              color: "#fff",
+                            }}
+                          >
+                            完了（削除）
+                          </button>
                         ) : (
-                          <span>タップ → {config.nextLabel}</span>
+                          <span className="text-xs md:text-sm" style={{ color: "#6b7280" }}>
+                            タップ → {config.nextLabel}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -352,10 +339,7 @@ export default function DisplayPage() {
                 })}
 
                 {statusTickets.length === 0 && (
-                  <div
-                    className="text-center py-8 text-sm"
-                    style={{ color: "#9ca3af" }}
-                  >
+                  <div className="text-center py-8 text-sm" style={{ color: "#9ca3af" }}>
                     なし
                   </div>
                 )}
