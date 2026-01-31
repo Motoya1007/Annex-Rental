@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 
+// ステータスは waiting / called の2種類のみ
 type TicketStatus = "waiting" | "called";
 
 interface Ticket {
-  id: string;
-  number: string;
+  id: string;       // UUID - APIのURLパスに使用する
+  number: string;   // 表示用の番号
   status: TicketStatus;
   created_at: string;
 }
@@ -37,20 +38,33 @@ const POLLING_INTERVAL = 10000; // 10秒
 export default function AdminPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [newNumber, setNewNumber] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // チケット一覧を取得
   const fetchTickets = useCallback(async () => {
     try {
-      const res = await fetch("/api/tickets", { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setTickets(data);
-        setLastUpdated(new Date());
+      setFetchError(null);
+      const res = await fetch("/api/tickets", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
       }
+
+      const data = await res.json();
+      setTickets(data);
+      setLastUpdated(new Date());
     } catch (error) {
-      console.error("Failed to fetch tickets:", error);
+      const message = error instanceof Error ? error.message : "取得失敗";
+      console.error("Failed to fetch tickets:", message);
+      setFetchError(message);
     }
   }, []);
 
@@ -61,80 +75,143 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, [fetchTickets]);
 
+  // ローディング状態を追加
+  const addLoading = (id: string) => {
+    setLoadingIds((prev) => new Set(prev).add(id));
+  };
+
+  // ローディング状態を解除
+  const removeLoading = (id: string) => {
+    setLoadingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  // 番号を追加（POST）
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newNumber.trim()) return;
+    const trimmed = newNumber.trim();
+    if (!trimmed) return;
 
-    setLoading(true);
+    setIsAdding(true);
     try {
       const res = await fetch("/api/tickets", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number: newNumber }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ number: trimmed }),
       });
 
-      if (res.ok) {
-        const { isExisting, ticket } = await res.json();
-        setNewNumber("");
-        await fetchTickets();
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
 
-        if (isExisting) {
-          showToast(`番号「${ticket.number}」を貸出待ちに戻しました`);
-        }
+      const { isExisting, ticket } = await res.json();
+      setNewNumber("");
+
+      // 成功したら即座に一覧を再取得
+      await fetchTickets();
+
+      if (isExisting) {
+        showToast(`番号「${ticket.number}」を貸出待ちに戻しました`);
       }
     } catch (error) {
-      console.error("Failed to add ticket:", error);
+      const message = error instanceof Error ? error.message : "追加失敗";
+      alert(`追加エラー: ${message}`);
+      console.error("Failed to add ticket:", message);
     } finally {
-      setLoading(false);
+      setIsAdding(false);
     }
   };
 
-  // waiting → called
+  // waiting → called に変更（PATCH）
+  // 重要: ticket.id (UUID) を使用する
   const handleCall = async (ticket: Ticket) => {
+    addLoading(ticket.id);
+
     try {
       const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ status: "called" }),
       });
-      if (res.ok) {
-        await fetchTickets();
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
       }
+
+      // 成功したら即座に一覧を再取得
+      await fetchTickets();
     } catch (error) {
-      console.error("Failed to update ticket:", error);
+      const message = error instanceof Error ? error.message : "更新失敗";
+      alert(`呼び出しエラー: ${message}`);
+      console.error("Failed to call ticket:", message);
+    } finally {
+      removeLoading(ticket.id);
     }
   };
 
-  // called → 削除
+  // called → 削除（DELETE）
+  // 重要: ticket.id (UUID) を使用する
   const handleComplete = async (ticket: Ticket) => {
+    addLoading(ticket.id);
+
     try {
       const res = await fetch(`/api/tickets/${ticket.id}`, {
         method: "DELETE",
       });
-      if (res.ok) {
-        await fetchTickets();
-        showUndoToast(ticket);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
       }
+
+      // 成功したら即座に一覧を再取得
+      await fetchTickets();
+
+      // Undo用トースト表示
+      showUndoToast(ticket);
     } catch (error) {
-      console.error("Failed to delete ticket:", error);
+      const message = error instanceof Error ? error.message : "削除失敗";
+      alert(`完了エラー: ${message}`);
+      console.error("Failed to delete ticket:", message);
+    } finally {
+      removeLoading(ticket.id);
     }
   };
 
+  // 削除したチケットを復元（POST）
   const handleRestore = async (ticket: Ticket) => {
     try {
       const res = await fetch("/api/tickets", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ number: ticket.number }),
       });
-      if (res.ok) {
-        await fetchTickets();
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
       }
+
+      await fetchTickets();
     } catch (error) {
-      console.error("Failed to restore ticket:", error);
+      const message = error instanceof Error ? error.message : "復元失敗";
+      alert(`復元エラー: ${message}`);
+      console.error("Failed to restore ticket:", message);
     }
   };
 
+  // 通常のトースト表示
   const showToast = (message: string) => {
     const id = crypto.randomUUID();
     setToasts((prev) => [...prev, { id, message }]);
@@ -143,6 +220,7 @@ export default function AdminPage() {
     }, 3000);
   };
 
+  // Undo付きトースト表示
   const showUndoToast = (ticket: Ticket) => {
     const id = crypto.randomUUID();
     setToasts((prev) => [
@@ -154,6 +232,7 @@ export default function AdminPage() {
     }, 5000);
   };
 
+  // Undo実行
   const handleUndo = async (toast: Toast) => {
     if (toast.deletedTicket) {
       await handleRestore(toast.deletedTicket);
@@ -161,10 +240,12 @@ export default function AdminPage() {
     setToasts((prev) => prev.filter((t) => t.id !== toast.id));
   };
 
+  // トーストを閉じる
   const dismissToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // 時刻フォーマット
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString("ja-JP", {
       hour: "2-digit",
@@ -173,6 +254,7 @@ export default function AdminPage() {
     });
   };
 
+  // ステータス別にフィルタ
   const ticketsByStatus = (status: TicketStatus) =>
     tickets.filter((t) => t.status === status);
 
@@ -182,6 +264,16 @@ export default function AdminPage() {
         <h1 className="text-2xl md:text-3xl font-bold text-center mb-6" style={{ color: "#111" }}>
           管理画面
         </h1>
+
+        {/* エラー表示 */}
+        {fetchError && (
+          <div
+            className="rounded-lg p-4 mb-4"
+            style={{ backgroundColor: "#fef2f2", border: "1px solid #ef4444", color: "#b91c1c" }}
+          >
+            取得エラー: {fetchError}
+          </div>
+        )}
 
         {/* 追加フォーム */}
         <form
@@ -201,19 +293,19 @@ export default function AdminPage() {
                 backgroundColor: "#fff",
                 color: "#111",
               }}
-              disabled={loading}
+              disabled={isAdding}
             />
             <button
               type="submit"
-              disabled={loading || !newNumber.trim()}
-              className="px-6 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isAdding || !newNumber.trim()}
+              className="px-6 py-2 rounded font-medium"
               style={{
-                backgroundColor: "#3b82f6",
+                backgroundColor: isAdding || !newNumber.trim() ? "#9ca3af" : "#3b82f6",
                 color: "#fff",
-                cursor: loading || !newNumber.trim() ? "not-allowed" : "pointer",
+                cursor: isAdding || !newNumber.trim() ? "not-allowed" : "pointer",
               }}
             >
-              追加
+              {isAdding ? "追加中..." : "追加"}
             </button>
           </div>
         </form>
@@ -277,45 +369,57 @@ export default function AdminPage() {
                 </div>
 
                 <div className="space-y-2">
-                  {statusTickets.map((ticket) => (
-                    <div
-                      key={ticket.id}
-                      className="flex items-center justify-between rounded-lg p-3 shadow"
-                      style={{ backgroundColor: config.cardBg }}
-                    >
-                      <span
-                        className="text-xl font-bold min-w-[60px]"
-                        style={{ color: "#111" }}
+                  {statusTickets.map((ticket) => {
+                    const isLoading = loadingIds.has(ticket.id);
+
+                    return (
+                      <div
+                        key={ticket.id}
+                        className="flex items-center justify-between rounded-lg p-3 shadow"
+                        style={{
+                          backgroundColor: isLoading ? "#e5e7eb" : config.cardBg,
+                          opacity: isLoading ? 0.7 : 1,
+                        }}
                       >
-                        {ticket.number}
-                      </span>
-                      {isWaiting ? (
-                        <button
-                          type="button"
-                          onClick={() => handleCall(ticket)}
-                          className="px-3 py-1 text-sm rounded font-medium"
-                          style={{
-                            backgroundColor: "#22c55e",
-                            color: "#fff",
-                          }}
+                        <span
+                          className="text-xl font-bold min-w-[60px]"
+                          style={{ color: "#111" }}
                         >
-                          呼び出す
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleComplete(ticket)}
-                          className="px-3 py-1 text-sm rounded font-medium"
-                          style={{
-                            backgroundColor: "#dc2626",
-                            color: "#fff",
-                          }}
-                        >
-                          完了
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                          {ticket.number}
+                        </span>
+
+                        {isWaiting ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCall(ticket)}
+                            disabled={isLoading}
+                            className="px-3 py-1 text-sm rounded font-medium"
+                            style={{
+                              backgroundColor: isLoading ? "#9ca3af" : "#22c55e",
+                              color: "#fff",
+                              cursor: isLoading ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {isLoading ? "処理中..." : "呼び出し済みにする"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleComplete(ticket)}
+                            disabled={isLoading}
+                            className="px-3 py-1 text-sm rounded font-medium"
+                            style={{
+                              backgroundColor: isLoading ? "#9ca3af" : "#dc2626",
+                              color: "#fff",
+                              cursor: isLoading ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {isLoading ? "処理中..." : "完了（削除）"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
 
                   {statusTickets.length === 0 && (
                     <div className="text-center py-6 text-sm" style={{ color: "#9ca3af" }}>
